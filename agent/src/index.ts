@@ -60,7 +60,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import yargs from "yargs";
-import { EthereumPlugin } from "@elizaos/plugin-ethereum";
+import { ethereumPlugin } from "@elizaos/plugin-ethereum";
 
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
@@ -505,6 +505,7 @@ export async function createAgent(
         // character.plugins are handled when clients are added
         plugins: [
             bootstrapPlugin,
+            ethereumPlugin,
             getSecret(character, "CONFLUX_CORE_PRIVATE_KEY")
                 ? confluxPlugin
                 : null,
@@ -573,11 +574,7 @@ export async function createAgent(
             getSecret(character, "SUI_PRIVATE_KEY") ? suiPlugin : null,
             getSecret(character, "STORY_PRIVATE_KEY") ? storyPlugin : null,
             getSecret(character, "ETHEREUM_RPC_URL") || getSecret(character, "INFURA_KEY")
-                ? new EthereumPlugin({
-                      rpcUrl: getSecret(character, "ETHEREUM_RPC_URL") ||
-                             `https://mainnet.infura.io/v3/${getSecret(character, "INFURA_KEY")}`
-                  })
-                : null,
+
         ].filter(Boolean),
         providers: [],
         actions: [],

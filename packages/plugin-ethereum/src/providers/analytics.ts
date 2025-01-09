@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { Provider } from '@elizaos/core';
+import { Provider, IAgentRuntime, Memory, State } from '@elizaos/core';
 import { TokenBalance, ERC20_ABI } from '../types/token';
 
 interface Transaction {
@@ -18,52 +18,57 @@ export class EthereumAnalytics implements Provider {
     this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
   }
 
+  async get(runtime: IAgentRuntime, message: Memory, state?: State): Promise<any> {
+    return this.provider;
+  }
+
   async getTransactionHistory(
     address: string,
-    fromBlock: number = 0,
-    limit?: number
+    fromBlock: number = 20783522,
+    limit: number = 1
   ): Promise<Transaction[]> {
     try {
-      // Get logs in batches to avoid RPC timeout
-      const batchSize = 2000;
-      const currentBlock = await this.provider.getBlockNumber();
+      const batchSize = 100;
+     // const currentBlock = await this.provider.getBlockNumber();
+     const currentBlock = 20783625;
       let allLogs: ethers.providers.Log[] = [];
 
-      for (let batch = fromBlock; batch <= currentBlock; batch += batchSize) {
-        const toBlock = Math.min(batch + batchSize - 1, currentBlock);
+      for (let batchStart = fromBlock; batchStart <= currentBlock; batchStart += batchSize) {
+        const batchEnd = Math.min(batchStart + batchSize - 1, currentBlock);
         const logs = await this.provider.getLogs({
           address,
-          fromBlock: batch,
-          toBlock
+          fromBlock: batchStart,
+          toBlock: batchEnd,
         });
+
         allLogs = allLogs.concat(logs);
 
-        if (limit && allLogs.length >= limit) {
+        if (allLogs.length >= limit) {
           allLogs = allLogs.slice(0, limit);
           break;
         }
       }
 
-      // Batch process transactions and blocks
       const txHashes = [...new Set(allLogs.map(log => log.transactionHash))];
-      const [transactions, blocks] = await Promise.all([
-        Promise.all(txHashes.map(hash => this.provider.getTransaction(hash))),
-        Promise.all(txHashes.map(hash => this.provider.getTransaction(hash).then(tx =>
-          this.provider.getBlock(tx.blockNumber!)
-        )))
-      ]);
+      const transactions = await Promise.all(
+        txHashes.map(async hash => {
+          const tx = await this.provider.getTransaction(hash);
+          const block = await this.provider.getBlock(tx.blockNumber!);
+          return {
+            hash: tx.hash,
+            from: tx.from,
+            to: tx.to!,
+            value: ethers.utils.formatEther(tx.value),
+            timestamp: block.timestamp,
+            blockNumber: tx.blockNumber!
+          };
+        })
+      );
 
-      return transactions.map((tx, i) => ({
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to!,
-        value: ethers.utils.formatEther(tx.value),
-        timestamp: blocks[i].timestamp,
-        blockNumber: tx.blockNumber!
-      }));
+      return transactions;
     } catch (error) {
       console.error('Error fetching transaction history:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -109,11 +114,11 @@ export class EthereumAnalytics implements Provider {
   private getCommonTokens(networkId: number): string[] {
     const COMMON_TOKENS = {
       1: [ // Ethereum Mainnet
-        '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
-        '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
-        '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
-        '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // WBTC
-        '0x514910771af9ca656af840dff83e8264ecf986ca'  // LINK
+        // '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
+        // '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
+        // '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
+        // '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', // WBTC
+        // '0x514910771af9ca656af840dff83e8264ecf986ca'  // LINK
       ],
       // Add other networks as needed
     };

@@ -150,6 +150,9 @@ importers:
       '@elizaos/plugin-conflux':
         specifier: workspace:*
         version: link:../packages/plugin-conflux
+      '@elizaos/plugin-ethereum':
+        specifier: workspace:*
+        version: link:../packages/plugin-ethereum
       '@elizaos/plugin-evm':
         specifier: workspace:*
         version: link:../packages/plugin-evm
