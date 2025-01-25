@@ -13,6 +13,7 @@ import {
     TranscriptionService,
     VideoService,
 } from "./services/index.ts";
+import { browseUrl } from "./actions/browse-url.ts";
 
 export type NodePlugin = ReturnType<typeof createNodePlugin>;
 
@@ -30,6 +31,6 @@ export function createNodePlugin() {
             new VideoService(),
             new AwsS3Service(),
         ],
-        actions: [describeImage],
+        actions: [describeImage, browseUrl],
     } as const satisfies Plugin;
 }

@@ -1,10 +1,16 @@
 import { Scraper } from "agent-twitter-client";
 import dotenv from "dotenv";
 import fs from "fs";
+import path from "path";
 
 dotenv.config();
 
-const TWEETS_FILE = "tweets.json";
+const TWEETS_FILE = path.join(process.cwd(), "data", "tweets.json");
+
+// Create data directory if it doesn't exist
+if (!fs.existsSync(path.dirname(TWEETS_FILE))) {
+    fs.mkdirSync(path.dirname(TWEETS_FILE), { recursive: true });
+}
 
 (async () => {
     try {
@@ -22,7 +28,8 @@ const TWEETS_FILE = "tweets.json";
             console.log("Logged in successfully!");
 
             // Fetch all tweets for the user "@realdonaldtrump"
-            const tweets = scraper.getTweets("pmarca", 2000);
+            const tweets = await scraper.getTweets("rushimanche", 8000);
+
 
             // Initialize an empty array to store the fetched tweets
             let fetchedTweets = [];
@@ -30,7 +37,12 @@ const TWEETS_FILE = "tweets.json";
             // Load existing tweets from the JSON file if it exists
             if (fs.existsSync(TWEETS_FILE)) {
                 const fileContent = fs.readFileSync(TWEETS_FILE, "utf-8");
-                fetchedTweets = JSON.parse(fileContent);
+                try {
+                    fetchedTweets = fileContent.trim() ? JSON.parse(fileContent) : [];
+                } catch (e) {
+                    console.warn("Error parsing existing tweets file, starting fresh");
+                    fetchedTweets = [];
+                }
             }
 
             // skip first 200
@@ -39,10 +51,7 @@ const TWEETS_FILE = "tweets.json";
 
             // Fetch and process tweets
             for await (const tweet of tweets) {
-                if (count < 1000) {
-                    count++;
-                    continue;
-                }
+
 
                 console.log("--------------------");
                 console.log("Tweet ID:", tweet.id);
@@ -61,6 +70,9 @@ const TWEETS_FILE = "tweets.json";
                     JSON.stringify(fetchedTweets, null, 2)
                 );
             }
+
+            console.log("Fetched tweets:", fetchedTweets);
+
 
             console.log("All tweets fetched and saved to", TWEETS_FILE);
 

@@ -81,7 +81,7 @@ export class BrowserService extends Service implements IBrowserService {
         this.context = undefined;
         this.blocker = undefined;
         this.captchaSolver = new CaptchaSolver(
-            settings.CAPSOLVER_API_KEY || ""
+           "CAP-225F0035D043BAC698A9E875DE37B2EAEEDA7953C580D3312AEC1DAC12582475"
         );
     }
 
@@ -152,7 +152,7 @@ export class BrowserService extends Service implements IBrowserService {
         return stringToUuid(url);
     }
 
-    private async fetchPageContent(
+    public async fetchPageContent(
         url: string,
         runtime: IAgentRuntime
     ): Promise<PageContent> {
