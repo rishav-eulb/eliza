@@ -1,0 +1,22 @@
+{
+  "name": "@elizaos/plugin-tweet-reply",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup --format esm --dts",
+    "clean": "rm -rf dist",
+    "dev": "tsup --format esm --dts --watch"
+  },
+  "dependencies": {
+    "@elizaos/core": "workspace:*",
+    "agent-twitter-client": "0.0.18",
+    "@aptos-labs/ts-sdk": "^1.5.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.4",
+    "tsup": "^8.0.0"
+  }
+}
