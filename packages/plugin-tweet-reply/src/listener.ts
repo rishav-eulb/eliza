@@ -6,7 +6,7 @@ import { DEFAULT_NETWORK, MOVEMENT_NETWORK_CONFIG } from "./constants";
 import { fetchBlocksWithEvents, BlockFetcherConfig, TweetReplyEvent } from './block-fetcher';
 
 // Store last processed block height
-let lastProcessedHeight = 7620233; // Starting block height
+// let lastProcessedHeight = 7620233; // Starting block height
 const POLLING_INTERVAL = 5000; // 5 seconds
 
 export const tweetReplyListener: Service = {
@@ -122,11 +122,11 @@ export const tweetReplyListener: Service = {
             while (true) {
                 try {
                     const blockFetcherConfig: BlockFetcherConfig = {
-                        startHeight: lastProcessedHeight,
+                        startHeight: await getLastProcessedHeight(runtime),
                         batchSize: 100,
                         maxRetries: 3,
                         retryDelay: 1000,
-                        endHeight: lastProcessedHeight + 100
+                        endHeight: await getLastProcessedHeight(runtime) + 100
                     };
 
                     const events = await fetchBlocksWithEvents(
@@ -137,7 +137,7 @@ export const tweetReplyListener: Service = {
 
                     if (events.length > 0) {
                         elizaLogger.info("Processing new events", {
-                            startBlock: lastProcessedHeight,
+                            startBlock: await getLastProcessedHeight(runtime),
                             endBlock: blockFetcherConfig.endHeight,
                             eventCount: events.length
                         });
@@ -155,7 +155,7 @@ export const tweetReplyListener: Service = {
                                 const eventData = event.data as TweetReplyEvent;
                                 
                                 // Check if event was already processed by querying the chain
-                                const isProcessed = await checkEventProcessed(aptosClient, eventData);
+                                const isProcessed = await checkEventProcessed(aptosClient, eventData, botPortalAddress);
                                 
                                 if (eventData.status === "PENDING" && !isProcessed) {
                                     const memory = {
@@ -183,7 +183,8 @@ export const tweetReplyListener: Service = {
                     }
 
                     // Update last processed height
-                    lastProcessedHeight = blockFetcherConfig.endHeight!;
+                    let lastProcessedHeight = blockFetcherConfig.endHeight!;
+                    await updateLastProcessedHeight(runtime, lastProcessedHeight);
 
                     // Wait before next polling
                     await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
@@ -209,16 +210,17 @@ export const tweetReplyListener: Service = {
 };
 
 // Helper function to check if an event was already processed
-async function checkEventProcessed(aptosClient: Aptos, event: TweetReplyEvent): Promise<boolean> {
+async function checkEventProcessed(aptosClient: Aptos, event: TweetReplyEvent, botPortalAddress: string): Promise<boolean> {
     try {
         // Query the chain for the event status
-        // This is a placeholder - implement according to your contract's storage pattern
         const eventStatus = await aptosClient.view({
-            function: `${botPortalAddress}::actions::get_event_status`,
-            type_arguments: [],
-            arguments: [event.tweet_link]
+            payload: {
+                function: `${botPortalAddress}::actions::get_event_status`,
+                typeArguments: [],
+                functionArguments: [event.tweet_link]
+            }
         });
-        return eventStatus === "COMPLETED";
+        return eventStatus[0] === "COMPLETED";
     } catch (error) {
         elizaLogger.error('Error checking event status:', {
             error: error.message,
@@ -226,4 +228,21 @@ async function checkEventProcessed(aptosClient: Aptos, event: TweetReplyEvent): 
         });
         return false;
     }
+}
+
+// Add a function to get the last processed height
+async function getLastProcessedHeight(runtime: IAgentRuntime): Promise<number> {
+    const stored = await runtime.getSetting("LAST_PROCESSED_HEIGHT");
+    if (!stored) {
+        // If no height is stored, start from a default height
+        const defaultHeight = 7620233;
+        await runtime.setSetting("LAST_PROCESSED_HEIGHT", defaultHeight.toString());
+        return defaultHeight;
+    }
+    return parseInt(stored, 10);
+}
+
+// Add a function to update the last processed height
+async function updateLastProcessedHeight(runtime: IAgentRuntime, height: number): Promise<void> {
+    await runtime.setSetting("LAST_PROCESSED_HEIGHT", height.toString());
 }
