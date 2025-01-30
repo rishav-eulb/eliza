@@ -1,15 +1,13 @@
 import { IAgentRuntime, Service, ServiceType, elizaLogger } from "@elizaos/core";
-import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
+import { Event, AptosConfig, Network, Aptos } from "@aptos-labs/ts-sdk";
 import { Scraper } from "agent-twitter-client";
 import { Memory } from "@elizaos/core";
 import { DEFAULT_NETWORK, MOVEMENT_NETWORK_CONFIG } from "./constants";
+import { fetchBlocksWithEvents, BlockFetcherConfig, TweetReplyEvent } from './block-fetcher';
 
-interface TweetReplyEvent {
-    user: string;
-    tweet_link: string;
-    status: string;
-    amount_paid: string;
-}
+// Store last processed block height
+let lastProcessedHeight = 7620233; // Starting block height
+const POLLING_INTERVAL = 5000; // 5 seconds
 
 export const tweetReplyListener: Service = {
     serviceType: ServiceType.BROWSER,
@@ -38,7 +36,7 @@ export const tweetReplyListener: Service = {
             try {
                 aptosClient = new Aptos(
                     new AptosConfig({
-                        network: Network.TESTNET,
+                        network: Network.CUSTOM,
                         fullnode: networkConfig.fullnode
                     })
                 );
@@ -52,6 +50,10 @@ export const tweetReplyListener: Service = {
                 });
                 throw aptosError;
             }
+
+            // Assuming 'aptosClient' is an instance of the 'Aptos' class
+            console.log(Object.getOwnPropertyNames(Object.getPrototypeOf(aptosClient)));
+   
 
             // Initialize Twitter client with detailed logging
             const scraper = new Scraper();
@@ -116,109 +118,112 @@ export const tweetReplyListener: Service = {
             }
             elizaLogger.debug("Bot portal configuration loaded:", { address: botPortalAddress });
 
-            // Fetch TweetReplyEvents from Aptos
-            elizaLogger.info("Fetching TweetReplyEvents from Aptos...");
-            let events;
-            try {
-                events = await aptosClient.getEventsByEventHandle({
-                    address: botPortalAddress,
-                    eventHandleStruct: `${botPortalAddress}::BotPortal::actions::TweetReplyEvent`,
-                    fieldName: "tweet_reply_events",
-                });
-            } catch (fetchError) {
-                elizaLogger.error("Failed to fetch events from Aptos:", {
-                    error: fetchError.message,
-                    botPortalAddress,
-                    network: DEFAULT_NETWORK,
-                    fullnode: networkConfig.fullnode,
-                    stack: fetchError.stack
-                });
-                throw fetchError;
-            }
-
-            if (!Array.isArray(events)) {
-                const error = new Error("Unexpected response format: events is not an array");
-                elizaLogger.error("Event format error:", {
-                    receivedType: typeof events,
-                    events,
-                    error: error.message
-                });
-                throw error;
-            }
-
-            elizaLogger.info("TweetReplyEvents fetched successfully", { 
-                eventCount: events.length,
-                network: DEFAULT_NETWORK
-            });
-
-            // Track processed tweet links to avoid duplicates
-            const processedTweets = new Set();
-            let processedCount = 0;
-            let errorCount = 0;
-
-            for (const event of events) {
+            // Start continuous event monitoring
+            while (true) {
                 try {
-                    if (!event || !event.data) {
-                        elizaLogger.warn("Skipping malformed event:", {
-                            event,
-                            reason: !event ? "null event" : "missing data"
+                    const blockFetcherConfig: BlockFetcherConfig = {
+                        startHeight: lastProcessedHeight,
+                        batchSize: 100,
+                        maxRetries: 3,
+                        retryDelay: 1000,
+                        endHeight: lastProcessedHeight + 100
+                    };
+
+                    const events = await fetchBlocksWithEvents(
+                        aptosClient,
+                        botPortalAddress,
+                        blockFetcherConfig
+                    );
+
+                    if (events.length > 0) {
+                        elizaLogger.info("Processing new events", {
+                            startBlock: lastProcessedHeight,
+                            endBlock: blockFetcherConfig.endHeight,
+                            eventCount: events.length
                         });
-                        continue;
+
+                        for (const event of events) {
+                            try {
+                                if (!event || !event.data) {
+                                    elizaLogger.warn("Skipping malformed event:", {
+                                        event,
+                                        reason: !event ? "null event" : "missing data"
+                                    });
+                                    continue;
+                                }
+
+                                const eventData = event.data as TweetReplyEvent;
+                                
+                                // Check if event was already processed by querying the chain
+                                const isProcessed = await checkEventProcessed(aptosClient, eventData);
+                                
+                                if (eventData.status === "PENDING" && !isProcessed) {
+                                    const memory = {
+                                        content: {
+                                            tweet_link: eventData.tweet_link,
+                                            user: eventData.user,
+                                            text: `Reply to tweet: ${eventData.tweet_link} for user ${eventData.user}`,
+                                            action: "TWEET_REPLY"
+                                        },
+                                        userId: runtime.agentId,
+                                        agentId: runtime.agentId,
+                                        roomId: runtime.agentId
+                                    };
+
+                                    await runtime.processActions(memory, [memory]);
+                                }
+                            } catch (eventError) {
+                                elizaLogger.error('Failed to process tweet reply event:', {
+                                    error: eventError.message,
+                                    stack: eventError.stack,
+                                    eventData: event.data
+                                });
+                            }
+                        }
                     }
 
-                    const eventData: TweetReplyEvent = event.data;
-                    elizaLogger.debug("Processing event:", {
-                        tweetLink: eventData.tweet_link,
-                        user: eventData.user,
-                        status: eventData.status
+                    // Update last processed height
+                    lastProcessedHeight = blockFetcherConfig.endHeight!;
+
+                    // Wait before next polling
+                    await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
+
+                } catch (error) {
+                    elizaLogger.error('Error in event polling loop:', {
+                        error: error.message,
+                        stack: error.stack
                     });
-
-                    if (eventData.status === "PENDING" && !processedTweets.has(eventData.tweet_link)) {
-                        processedTweets.add(eventData.tweet_link);
-
-                        const memory: Memory = {
-                            content: {
-                                tweet_link: eventData.tweet_link,
-                                user: eventData.user,
-                                text: `Reply to tweet: ${eventData.tweet_link} for user ${eventData.user}`
-                            },
-                            userId: runtime.agentId,
-                            agentId: runtime.agentId,
-                            roomId: runtime.agentId
-                        };
-
-                        await runtime.processActions(memory, [memory]);
-                        processedCount++;
-                        elizaLogger.info(`Successfully processed tweet reply for ${eventData.tweet_link}`, {
-                            user: eventData.user,
-                            processedCount
-                        });
-                    }
-                } catch (eventError) {
-                    errorCount++;
-                    elizaLogger.error('Failed to process tweet reply event:', {
-                        error: eventError.message,
-                        stack: eventError.stack,
-                        eventData: event.data,
-                        errorCount
-                    });
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
                 }
             }
-
-            elizaLogger.info("Tweet reply processing complete", {
-                totalEvents: events.length,
-                processedCount,
-                errorCount,
-                skippedCount: events.length - processedCount - errorCount
-            });
 
         } catch (error) {
             elizaLogger.error('Fatal error in tweet reply listener:', {
                 error: error.message,
-                stack: error.stack,
-                type: error.constructor.name
+                stack: error.stack
             });
-            throw error; // Re-throw to ensure the error is properly handled by the runtime
+            throw error;
         }
     }
 };
+
+// Helper function to check if an event was already processed
+async function checkEventProcessed(aptosClient: Aptos, event: TweetReplyEvent): Promise<boolean> {
+    try {
+        // Query the chain for the event status
+        // This is a placeholder - implement according to your contract's storage pattern
+        const eventStatus = await aptosClient.view({
+            function: `${botPortalAddress}::actions::get_event_status`,
+            type_arguments: [],
+            arguments: [event.tweet_link]
+        });
+        return eventStatus === "COMPLETED";
+    } catch (error) {
+        elizaLogger.error('Error checking event status:', {
+            error: error.message,
+            tweetLink: event.tweet_link
+        });
+        return false;
+    }
+}
