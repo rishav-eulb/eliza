@@ -1,4 +1,4 @@
-import { Action, IAgentRuntime, Memory, State, elizaLogger } from "@elizaos/core";
+import { Action, IAgentRuntime, Memory, State, elizaLogger, composeContext, generateText, ModelClass } from "@elizaos/core";
 import { Scraper } from "agent-twitter-client";
 
 export const replyAction: Action = {
@@ -56,10 +56,11 @@ export const replyAction: Action = {
             }
 
             // Generate response using template
-            const response = generateResponse({
+            const response = await generateResponse({
                 template,
                 user,
-                tweet_text: tweetData.text
+                tweet_text: tweetData.text,
+                runtime
             });
 
             // Send the generated reply
@@ -98,17 +99,27 @@ interface ResponseParams {
     template: string;
     user: string;
     tweet_text: string;
+    runtime: IAgentRuntime;
 }
 
-function generateResponse({ template, user, tweet_text }: ResponseParams): string {
-    // Replace template variables
-    let response = template
-        .replace('{{user}}', user)
-        .replace('{{tweet_text}}', tweet_text);
+async function generateResponse({ template, user, tweet_text, runtime }: ResponseParams): Promise<string> {
+    const context = composeContext({
+        state: {
+            user,
+            tweet_text,
+        } as unknown as State,
+        template,
+    });
+
+    const response = await generateText({
+        runtime,
+        context,
+        modelClass: ModelClass.SMALL,
+    });
 
     // Ensure response is within Twitter's character limit (280)
     if (response.length > 280) {
-        response = response.substring(0, 277) + '...';
+        return response.substring(0, 277) + '...';
     }
 
     return response;
