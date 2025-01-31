@@ -25,8 +25,12 @@ export const replyAction: Action = {
 
     handler: async (runtime: IAgentRuntime, message: Memory, state?: State): Promise<boolean> => {
         try {
-            const content = message.content as unknown as { tweet_link: string; user: string };
-            const { tweet_link, user } = content;
+            const content = message.content as unknown as { 
+                tweet_link: string; 
+                user: string;
+                template: string;
+            };
+            const { tweet_link, user, template } = content;
             const tweetId = extractTweetId(tweet_link);
             
             // Initialize Twitter client
@@ -43,9 +47,23 @@ export const replyAction: Action = {
                 return false;
             }
 
-            // Generate and send reply
-            const replyContent = `Thanks @${user} for using our service! Your request has been processed.`;
-            await scraper.sendTweet(replyContent, tweetId);
+            // Fetch the original tweet text
+            elizaLogger.info("Fetching original tweet content", { tweetId });
+            const tweetData = await scraper.getTweet(tweetId);
+            if (!tweetData || !tweetData.text) {
+                elizaLogger.error("Failed to fetch tweet content", { tweetId });
+                return false;
+            }
+
+            // Generate response using template
+            const response = generateResponse({
+                template,
+                user,
+                tweet_text: tweetData.text
+            });
+
+            // Send the generated reply
+            await scraper.sendTweet(response, tweetId);
             
             // Update event status to COMPLETED
             await runtime.processActions(message, [{
@@ -59,7 +77,10 @@ export const replyAction: Action = {
                 roomId: message.roomId
             }]);
             
-            elizaLogger.info(`Reply sent successfully to tweet ${tweetId}`);
+            elizaLogger.info(`Reply sent successfully to tweet ${tweetId}`, {
+                originalTweet: tweetData.text,
+                generatedReply: response
+            });
             return true;
         } catch (error) {
             elizaLogger.error("Error in reply action:", error);
@@ -71,4 +92,24 @@ export const replyAction: Action = {
 function extractTweetId(tweetLink: string): string {
     const matches = tweetLink.match(/\/status\/(\d+)/);
     return matches?.[1] || '';
+}
+
+interface ResponseParams {
+    template: string;
+    user: string;
+    tweet_text: string;
+}
+
+function generateResponse({ template, user, tweet_text }: ResponseParams): string {
+    // Replace template variables
+    let response = template
+        .replace('{{user}}', user)
+        .replace('{{tweet_text}}', tweet_text);
+
+    // Ensure response is within Twitter's character limit (280)
+    if (response.length > 280) {
+        response = response.substring(0, 277) + '...';
+    }
+
+    return response;
 } 
